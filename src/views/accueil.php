@@ -60,9 +60,9 @@ $email    = htmlspecialchars($_SESSION['email']    ?? '');
                 <i class="fa-solid fa-house"></i>
                 <span>Home Map</span>
             </a>
-            <a href="/profil" class="nav-link">
+            <a href="/communaute" class="nav-link">
                 <i class="fa-regular fa-circle-user"></i>
-                <span>Profil</span>
+                <span>Communauté</span>
             </a>
             <a href="/parametres" class="nav-link">
                 <i class="fa-solid fa-gear"></i>
@@ -130,6 +130,14 @@ $email    = htmlspecialchars($_SESSION['email']    ?? '');
                         <span><i class="fa-solid fa-filter"></i> Filtrer par poisson</span>
                         <button type="button" id="filter-reset">Réinitialiser</button>
                     </div>
+                    <div class="filter-fixed">
+                        <button type="button" class="filter-item filter-support" id="filter-support">
+                            <i class="fa-solid fa-shield-halved"></i>
+                            <span>Spots Support</span>
+                            <i class="fa-solid fa-check filter-check"></i>
+                        </button>
+                    </div>
+                    <div class="filter-divider">Espèces</div>
                     <div class="filter-list" id="filter-list"></div>
                 </div>
             </div>
@@ -190,6 +198,16 @@ $email    = htmlspecialchars($_SESSION['email']    ?? '');
     </form>
 </div>
 
+<div class="modal-overlay" id="cooldown-overlay"></div>
+<div class="modal-box cooldown-box" id="cooldown-modal">
+    <div class="cooldown-icon"><i class="fa-solid fa-hourglass-half"></i></div>
+    <h2>Doucement, pêcheur !</h2>
+    <p>Pour garder la carte fiable et éviter le spam, vous pouvez ajouter <strong>1 spot par heure</strong>.</p>
+    <div class="cooldown-timer" id="cooldown-timer">--:--</div>
+    <p class="cooldown-hint">avant de pouvoir ajouter un nouveau spot</p>
+    <button type="button" class="btn-auth cooldown-close" id="cooldown-close">J'ai compris</button>
+</div>
+
 <!-- ══════════════════════════════════════
      PANNEAU LATÉRAL — Détails d'un spot
 ══════════════════════════════════════ -->
@@ -229,7 +247,7 @@ if (savedTheme === 'dark') {
    CARTE LEAFLET
    ================================================================ */
 const tileLight = 'https://maps.wikimedia.org/osm-intl/{z}/{x}/{y}{r}.png?lang=fr';
-const tileDark  = 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png';
+const tileDark  = tileLight; // même fond, assombri par CSS en mode dark
 
 const map = L.map('map', {
     zoomControl: false,
@@ -282,9 +300,6 @@ btnLight.addEventListener('click', () => {
     app.classList.add('theme-light');
     btnLight.classList.add('active');
     btnDarkT.classList.remove('active');
-
-    map.removeLayer(currentLayer);
-    currentLayer = L.tileLayer(tileLight, { maxZoom: 19, detectRetina: true, noWrap: true }).addTo(map);
 
     localStorage.setItem('webpeche_theme', 'light');
 });
@@ -392,13 +407,27 @@ function filterLocalSpots(query) {
         .slice(0, 5);
 }
 
+const placesCache = new Map();
+let searchController = null;
+
 async function fetchSuggestions(query, localMatches) {
+    const key = normalizeText(query);
+    if (placesCache.has(key)) {
+        renderSuggestions(localMatches, placesCache.get(key));
+        return;
+    }
+
+    if (searchController) searchController.abort(); // annule la requête précédente
+    searchController = new AbortController();
+
     try {
         const url = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(query)}&limit=8&accept-language=fr&countrycodes=fr,be`;
-        const res    = await fetch(url);
+        const res    = await fetch(url, { signal: searchController.signal });
         const places = await res.json();
+        placesCache.set(key, places);
         renderSuggestions(localMatches, places);
     } catch (err) {
+        if (err.name === 'AbortError') return;
         console.error('Erreur de recherche :', err);
         renderSuggestions(localMatches, []);
     }
@@ -504,62 +533,74 @@ function shortAddress(address, parts = 2) {
     return address.split(',').slice(0, parts).map(s => s.trim()).join(', ');
 }
 
-// Badge "Utilisateur" / "Admin" — affiché en haut de chaque popup et du panneau
-function authorBadgeHtml(isAdmin) {
-    return isAdmin
-        ? `<div class="popup-author is-admin"><i class="fa-solid fa-shield-halved"></i><span>Admin</span></div>`
-        : `<div class="popup-author"><i class="fa-solid fa-circle-user"></i><span>Utilisateur</span></div>`;
+// Badge auteur : "Support" (admin) ou le nom de l'utilisateur
+function authorBadgeHtml(isAdmin, name) {
+    if (isAdmin) {
+        return `<div class="popup-author is-admin"><i class="fa-solid fa-circle-check"></i><span>Support</span></div>`;
+    }
+    const label = name ? escapeHtml(name) : 'Utilisateur';
+    return `<div class="popup-author"><i class="fa-solid fa-circle-user"></i><span>${label}</span></div>`;
+}
+
+// Espèces sous forme de pastilles (max 3 dans la popup, "+N" pour le reste)
+function speciesChipsHtml(species, max = 3) {
+    const list = (species || '').split(',').map(s => s.trim()).filter(Boolean);
+    if (!list.length) return '<span class="species-chip species-empty">Espèces non renseignées</span>';
+
+    const shown = list.slice(0, max).map(f => `<span class="species-chip">${escapeHtml(f)}</span>`).join('');
+    const more  = list.length > max ? `<span class="species-chip species-more">+${list.length - max}</span>` : '';
+    return shown + more;
 }
 
 function popupHtml(spot) {
-    const region    = spot.region ? shortAddress(spot.region) : '';
-    const species   = spot.species
-        ? `🐟 ${escapeHtml(spot.species)}`
-        : `🐟 Espèces non renseignées`;
-    const myScore   = spot.my_score || 0;
-    const canDelete = !!spot.can_delete;
+    const region  = spot.region ? shortAddress(spot.region) : '';
+    const myScore = spot.my_score || 0;
 
     return `
-        <div class="spot-popup" data-spot-id="${spot.id}">
-            ${authorBadgeHtml(spot.creator_is_admin)}
-
-            <strong class="popup-title">${escapeHtml(spot.name)}</strong>
-
-            <div class="popup-rating-row">
+        <div class="spot-popup ${spot.creator_is_admin ? 'is-support' : ''}" data-spot-id="${spot.id}">
+            <div class="popup-top">
+                ${authorBadgeHtml(spot.creator_is_admin, spot.creator_name)}
                 ${ratingBadgeHtml(spot.rating)}
-                <div class="popup-stars" data-selected="${myScore}">
-                    ${buildStarsHtml(spot.id, myScore)}
-                </div>
             </div>
 
-            ${region ? `<p class="popup-meta"><i class="fa-solid fa-location-dot"></i> ${escapeHtml(region)}</p>` : ''}
-            <p class="popup-meta">${species}</p>
+            <h3 class="popup-title">${escapeHtml(spot.name)}</h3>
+
+            ${region ? `<div class="popup-meta"><i class="fa-solid fa-location-dot"></i><span>${escapeHtml(region)}</span></div>` : ''}
+
+            <div class="popup-species">${speciesChipsHtml(spot.species)}</div>
+
+            <div class="popup-rate">
+                <span class="popup-rate-label">Votre note</span>
+                <div class="popup-stars" data-selected="${myScore}">${buildStarsHtml(spot.id, myScore)}</div>
+            </div>
 
             <div class="popup-actions">
-                <button class="popup-btn more" onclick="openSpotPanel(${spot.id})">
-                    Voir plus
-                </button>
-                ${canDelete ? `
-                    <button class="popup-btn delete" onclick="deleteSpot(${spot.id})" title="Supprimer ce spot">
+                ${spot.can_delete ? `
+                    <button class="popup-delete" onclick="deleteSpot(${spot.id})" title="Supprimer ce spot">
                         <i class="fa-solid fa-trash"></i>
-                    </button>
-                ` : ''}
+                    </button>` : ''}
+                <button class="popup-more" onclick="openSpotPanel(${spot.id})">
+                    Voir les détails <i class="fa-solid fa-arrow-right"></i>
+                </button>
             </div>
         </div>
     `;
 }
 
 function addSpotMarker(spot) {
-    const marker = L.marker([spot.latitude, spot.longitude]).addTo(spotsLayer);
+    // Les spots du support ont une icône d'une autre couleur (voir .marker-support en CSS)
+    const icon = new L.Icon.Default({ className: spot.creator_is_admin ? 'marker-support' : '' });
+    const marker = L.marker([spot.latitude, spot.longitude], { icon }).addTo(spotsLayer);
 
-    // IMPORTANT : on lie une FONCTION (pas une chaîne figée) pour que la popup
-    // se régénère avec les données à jour (note, étoiles) à chaque ouverture,
-    // au lieu de réafficher l'ancien contenu du moment du chargement de la page
-    marker.bindPopup(() => popupHtml(spot), { minWidth: 230 });
+    marker.bindPopup(() => popupHtml(spot), { minWidth: 260, maxWidth: 300 });
+
+    // Dès que la popup s'ouvre, on précharge les détails en arrière-plan :
+    // "Voir les détails" sera alors instantané
+    marker.on('popupopen', () => fetchSpotDetails(spot.id).catch(() => {}));
+
     markersById[spot.id] = marker;
 }
 
-// Retire un spot de la carte et de la mémoire locale (après suppression)
 function removeSpotFromMap(id) {
     const marker = markersById[id];
     if (marker) {
@@ -567,6 +608,7 @@ function removeSpotFromMap(id) {
         delete markersById[id];
     }
     allSpots = allSpots.filter(s => s.id !== id);
+    spotDetailsCache.delete(id);
 }
 
 // Supprime un spot (popup ou panneau) après confirmation
@@ -740,7 +782,27 @@ document.getElementById('filter-reset').addEventListener('click', () => {
     updateFilterBadge();
 });
 
-// Affiche les spots correspondant à AU MOINS UN des poissons sélectionnés
+let supportOnly = false;
+const btnSupport = document.getElementById('filter-support');
+
+btnSupport.addEventListener('click', () => {
+    supportOnly = !supportOnly;
+    btnSupport.classList.toggle('active', supportOnly);
+    applyFishFilter();
+    updateFilterBadge();
+});
+
+document.getElementById('filter-reset').addEventListener('click', () => {
+    activeFishFilters.clear();
+    supportOnly = false;
+    btnSupport.classList.remove('active');
+    applyFishFilter();
+    renderFilterList();
+    updateFilterBadge();
+});
+
+// Affiche les spots qui respectent TOUS les filtres actifs :
+// (support uniquement, si coché) ET (au moins un des poissons choisis)
 function applyFishFilter() {
     const queries = Array.from(activeFishFilters).map(normalizeText);
 
@@ -748,8 +810,10 @@ function applyFishFilter() {
         const marker = markersById[spot.id];
         if (!marker) return;
 
-        const spotSpecies = normalizeText(spot.species || '');
-        const matches = queries.length === 0 || queries.some(q => spotSpecies.includes(q));
+        const spotSpecies  = normalizeText(spot.species || '');
+        const matchSupport = !supportOnly || spot.creator_is_admin;
+        const matchFish    = queries.length === 0 || queries.some(q => spotSpecies.includes(q));
+        const matches      = matchSupport && matchFish;
 
         if (matches && !spotsLayer.hasLayer(marker)) {
             spotsLayer.addLayer(marker);
@@ -759,10 +823,10 @@ function applyFishFilter() {
     });
 }
 
-// Petit badge rond affichant le nombre de filtres actifs sur le bouton
 function updateFilterBadge() {
-    if (activeFishFilters.size > 0) {
-        filterBadge.textContent = activeFishFilters.size;
+    const count = activeFishFilters.size + (supportOnly ? 1 : 0);
+    if (count > 0) {
+        filterBadge.textContent = count;
         filterBadge.classList.add('visible');
     } else {
         filterBadge.classList.remove('visible');
@@ -839,6 +903,9 @@ async function rateSpotStars(id, score, starEl) {
             spotData.my_score = score;
         }
 
+        const cached = spotDetailsCache.get(id);
+        if (cached) { cached.rating = data.rating; cached.my_score = score; }
+
         // Met à jour le badge de pourcentage dans la popup, si elle est ouverte
         const popupBadge = document.querySelector(`.spot-popup[data-spot-id="${id}"] .spot-rating-value`);
         if (popupBadge) applyRatingBadge(popupBadge, data.rating);
@@ -865,12 +932,17 @@ const addSpotOverlay  = document.getElementById('add-spot-overlay');
 const addSpotModal    = document.getElementById('add-spot-modal');
 const addSpotForm     = document.getElementById('add-spot-form');
 
-btnAddSpot.addEventListener('click', () => {
-    if (placementMode) {
-        cancelPlacement();
-    } else {
-        startPlacement();
-    }
+btnAddSpot.addEventListener('click', async () => {
+    if (placementMode) { cancelPlacement(); return; }
+
+    // On vérifie le cooldown AVANT de faire placer le pin
+    try {
+        const res  = await fetch('/api/spots/cooldown');
+        const data = await res.json();
+        if (data.remaining > 0) { showCooldownModal(data.remaining); return; }
+    } catch (err) { /* le serveur re-vérifiera de toute façon */ }
+
+    startPlacement();
 });
 
 function startPlacement() {
@@ -960,6 +1032,11 @@ addSpotForm.addEventListener('submit', async (e) => {
         const res  = await fetch('/api/spots', { method: 'POST', body: formData });
         const spot = await res.json();
 
+        if (spot.cooldown) {                       // sécurité si le cooldown a été dépassé entre-temps
+            closeAddSpotFlow();
+            showCooldownModal(spot.retry_after);
+            return;
+        }
         if (spot.error) { alert(spot.error); return; }
 
         allSpots.push(spot);
@@ -976,6 +1053,48 @@ addSpotForm.addEventListener('submit', async (e) => {
 });
 
 /* ================================================================
+   POPUP COOLDOWN — 1 spot par heure
+   ================================================================ */
+const cooldownOverlay = document.getElementById('cooldown-overlay');
+const cooldownModal   = document.getElementById('cooldown-modal');
+const cooldownTimer   = document.getElementById('cooldown-timer');
+let cooldownInterval  = null;
+
+function showCooldownModal(seconds) {
+    let left = Math.max(1, Math.ceil(seconds));
+
+    const render = () => {
+        const m = String(Math.floor(left / 60)).padStart(2, '0');
+        const s = String(left % 60).padStart(2, '0');
+        cooldownTimer.textContent = `${m}:${s}`;
+    };
+
+    render();
+    clearInterval(cooldownInterval);
+    cooldownInterval = setInterval(() => {
+        left--;
+        if (left <= 0) {
+            clearInterval(cooldownInterval);
+            cooldownTimer.textContent = 'C\'est bon !';
+            return;
+        }
+        render();
+    }, 1000);
+
+    cooldownOverlay.classList.add('visible');
+    cooldownModal.classList.add('visible');
+}
+
+function closeCooldownModal() {
+    clearInterval(cooldownInterval);
+    cooldownOverlay.classList.remove('visible');
+    cooldownModal.classList.remove('visible');
+}
+
+document.getElementById('cooldown-close').addEventListener('click', closeCooldownModal);
+cooldownOverlay.addEventListener('click', closeCooldownModal);
+
+/* ================================================================
    PANNEAU LATÉRAL — "Voir plus" : détails + avis d'un spot
    ================================================================ */
 const spotPanel        = document.getElementById('spot-panel');
@@ -984,36 +1103,79 @@ const spotPanelOverlay = document.getElementById('spot-panel-overlay');
 
 let currentSpotComments = []; // avis du spot actuellement affiché (pour le filtre par étoiles)
 
+// Cache des détails (avis inclus) : évite de re-télécharger à chaque ouverture
+const spotDetailsCache   = new Map(); // id -> spot détaillé
+const spotDetailsPending = new Map(); // id -> requête en cours (évite les doublons)
+const DETAILS_TTL        = 60 * 1000; // les avis sont rafraîchis après 60 s
+
+function fetchSpotDetails(id) {
+    const cached = spotDetailsCache.get(id);
+    if (cached && Date.now() - cached._cachedAt < DETAILS_TTL) return Promise.resolve(cached);
+    if (spotDetailsPending.has(id)) return spotDetailsPending.get(id);
+
+    const p = fetch(`/api/spot?id=${id}`)
+        .then(r => r.json())
+        .then(spot => {
+            if (!spot.error) {
+                spot._cachedAt = Date.now();
+                spotDetailsCache.set(id, spot);
+            }
+            return spot;
+        })
+        .finally(() => spotDetailsPending.delete(id));
+
+    spotDetailsPending.set(id, p);
+    return p;
+}
+
 async function openSpotPanel(id) {
     spotPanel.classList.add('open');
     spotPanelOverlay.classList.add('visible');
-    spotPanelBody.innerHTML = '<p class="panel-loading">Chargement...</p>';
+    spotPanel.dataset.currentSpot = id;
 
+    // 1) Affichage IMMÉDIAT avec ce qu'on a déjà (cache ou données de la carte)
+    const base    = allSpots.find(s => s.id === id);
+    const instant = spotDetailsCache.get(id) || (base ? { ...base, comments: null } : null);
+
+    if (instant) renderSpotPanel(instant);
+    else spotPanelBody.innerHTML = '<p class="panel-loading">Chargement...</p>';
+
+    // 2) Les avis arrivent ensuite, sans reconstruire tout le panneau
     try {
-        const res  = await fetch(`/api/spot?id=${id}`);
-        const spot = await res.json();
+        const spot = await fetchSpotDetails(id);
+        if (spotPanel.dataset.currentSpot !== String(id)) return; // panneau fermé ou changé entre-temps
 
         if (spot.error) {
-            spotPanelBody.innerHTML = `<p class="panel-loading">${escapeHtml(spot.error)}</p>`;
+            if (!instant) spotPanelBody.innerHTML = `<p class="panel-loading">${escapeHtml(spot.error)}</p>`;
             return;
         }
 
-        spotPanel.dataset.currentSpot = spot.id;
-        renderSpotPanel(spot);
+        if (!instant)              renderSpotPanel(spot);
+        else if (spot !== instant) setPanelComments(spot.comments);
     } catch (err) {
-        spotPanelBody.innerHTML = '<p class="panel-loading">Erreur de chargement.</p>';
+        if (!instant) spotPanelBody.innerHTML = '<p class="panel-loading">Erreur de chargement.</p>';
     }
 }
 
-function renderSpotPanel(spot) {
-    const species     = spot.species     || 'Non renseignées';
-    const region       = spot.region       || 'Non renseignée';
-    const description = spot.description || 'Aucune description pour le moment.';
+// Met à jour uniquement la liste d'avis (garde le texte que l'utilisateur est en train d'écrire)
+function setPanelComments(comments) {
+    currentSpotComments = comments;
+    const countEl = document.getElementById('reviews-count');
+    if (countEl) countEl.textContent = comments.length;
 
-    currentSpotComments = spot.comments;
+    const active = document.querySelector('#review-filter .review-filter-btn.active');
+    renderReviewsList(active ? active.dataset.filter : 'all');
+}
+
+function renderSpotPanel(spot) {
+    const region      = spot.region      || 'Non renseignée';
+    const description = spot.description || 'Aucune description pour le moment.';
+    const loaded      = Array.isArray(spot.comments);
+
+    currentSpotComments = loaded ? spot.comments : [];
 
     spotPanelBody.innerHTML = `
-        ${authorBadgeHtml(spot.creator_is_admin)}
+        ${authorBadgeHtml(spot.creator_is_admin, spot.creator_name)}
 
         <div class="panel-title-row">
             <h2>${escapeHtml(spot.name)}</h2>
@@ -1031,8 +1193,8 @@ function renderSpotPanel(spot) {
         <p class="panel-rating-hint">Cliquez sur une étoile pour donner votre note</p>
 
         <div class="panel-info-block">
-            <p class="panel-meta-line"><i class="fa-solid fa-location-dot"></i> ${escapeHtml(region)}</p>
-            <p class="panel-meta-line">🐟 ${escapeHtml(species)}</p>
+            <div class="panel-meta-line"><i class="fa-solid fa-location-dot"></i><span>${escapeHtml(region)}</span></div>
+            <div class="popup-species panel-species">${speciesChipsHtml(spot.species, 99)}</div>
         </div>
 
         <p class="panel-description">${escapeHtml(description)}</p>
@@ -1040,7 +1202,7 @@ function renderSpotPanel(spot) {
         <hr>
 
         <div class="reviews-header">
-            <h3>Avis (<span id="reviews-count">${spot.comments.length}</span>)</h3>
+            <h3>Avis (<span id="reviews-count">${loaded ? spot.comments.length : '…'}</span>)</h3>
             <div class="review-filter" id="review-filter">
                 <button type="button" class="review-filter-btn active" data-filter="all">Tout</button>
                 <button type="button" class="review-filter-btn" data-filter="5">5★</button>
@@ -1051,7 +1213,9 @@ function renderSpotPanel(spot) {
             </div>
         </div>
 
-        <div class="reviews-list" id="reviews-list"></div>
+        <div class="reviews-list" id="reviews-list">
+            ${loaded ? '' : '<p class="no-reviews">Chargement des avis...</p>'}
+        </div>
 
         <form class="add-review-form" onsubmit="submitReview(event, ${spot.id})">
             <textarea name="comment" placeholder="Partagez votre expérience sur ce spot..." required></textarea>
@@ -1059,7 +1223,7 @@ function renderSpotPanel(spot) {
         </form>
     `;
 
-    renderReviewsList('all');
+    if (loaded) renderReviewsList('all');
 
     document.querySelectorAll('#review-filter .review-filter-btn').forEach(btn => {
         btn.addEventListener('click', () => {

@@ -91,22 +91,38 @@ switch ($uri) {
     case '/accueil':
         require_once __DIR__ . '/../src/views/accueil.php';
         break;
-
-    // Page profil de l'utilisateur connecté
-    case '/profil':
-        require_once __DIR__ . '/../src/views/profil.php';
-        break;
-
     // Page communauté (anciennement "profil", renommée par l'utilisateur)
     case '/communaute':
         require_once __DIR__ . '/../src/views/communaute.php';
         break;
 
-    // Page paramètres de l'utilisateur connecté
+        // Page paramètres de l'utilisateur connecté
+    case '/parametres':
     case '/parametre':
-        require_once __DIR__ . '/../src/views/parametre.php';
+        require_once __DIR__ . '/../src/controllers/ParametresController.php';
+        (new ParametresController())->show();
         break;
 
+    // API — Paramètres
+    case '/api/check-username':
+        require_once __DIR__ . '/../src/controllers/ParametresController.php';
+        (new ParametresController())->checkUsername();
+        break;
+
+    case '/api/parametres/update':
+        require_once __DIR__ . '/../src/controllers/ParametresController.php';
+        (new ParametresController())->updateProfile();
+        break;
+
+    case '/api/parametres/password':
+        require_once __DIR__ . '/../src/controllers/ParametresController.php';
+        (new ParametresController())->updatePassword();
+        break;
+
+    case '/api/parametres/delete':
+        require_once __DIR__ . '/../src/controllers/ParametresController.php';
+        (new ParametresController())->deleteAccount();
+        break;
     // Page de documentation / aide — accessible à tous
     case '/documentation':
         require_once __DIR__ . '/../src/views/documentation.php';
@@ -141,9 +157,27 @@ switch ($uri) {
         $ctrl->destroy();
         break;
 
+        // GET ?post_id=X : commentaires d'un post (chargés à l'ouverture)
+    case '/api/post/comments':
+        require_once __DIR__ . '/../src/controllers/CommunityController.php';
+        (new CommunityController())->comments();
+        break;
+
+    // POST : réaction (pouce bleu / rouge) sur un post
+    case '/api/post/react':
+        require_once __DIR__ . '/../src/controllers/CommunityController.php';
+        (new CommunityController())->react();
+        break;
+
     // --------------------------------------------------------
     // API — Spots de pêche
     // --------------------------------------------------------
+
+        // GET : temps restant avant de pouvoir ajouter un spot (anti-spam)
+    case '/api/spots/cooldown':
+        require_once __DIR__ . '/../src/controllers/SpotController.php';
+        (new SpotController())->cooldown();
+        break;
 
     // GET  : liste tous les spots (pour les marqueurs)
     // POST : crée un nouveau spot

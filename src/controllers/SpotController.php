@@ -13,6 +13,7 @@ require_once __DIR__ . '/../config/database.php';
 
 class SpotController
 {
+    private const SPOT_COOLDOWN_SECONDS = 3600; // 1 heure
     // --------------------------------------------------------
     // GET /api/spots → liste tous les spots (pour les marqueurs)
     // --------------------------------------------------------
@@ -22,10 +23,10 @@ class SpotController
             $pdo  = Database::connect();
             $stmt = $pdo->query(
                 'SELECT s.id, s.name, s.description, s.latitude, s.longitude, s.region, s.species,
-                        s.rating, s.user_id, u.is_admin AS creator_is_admin
-                 FROM fishing_spots s
-                 JOIN users u ON u.id = s.user_id
-                 ORDER BY s.created_at DESC'
+                s.rating, s.user_id, u.is_admin AS creator_is_admin, u.username AS creator_name
+                FROM fishing_spots s
+                JOIN users u ON u.id = s.user_id
+                ORDER BY s.created_at DESC'
             );
             $spots = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
@@ -67,10 +68,10 @@ class SpotController
             $pdo = Database::connect();
 
             $stmt = $pdo->prepare(
-                'SELECT s.*, u.is_admin AS creator_is_admin
-                 FROM fishing_spots s
-                 JOIN users u ON u.id = s.user_id
-                 WHERE s.id = ?'
+                'SELECT s.*, u.is_admin AS creator_is_admin, u.username AS creator_name
+                FROM fishing_spots s
+                JOIN users u ON u.id = s.user_id
+                WHERE s.id = ?'
             );
             $stmt->execute([$id]);
             $spot = $stmt->fetch(PDO::FETCH_ASSOC);
@@ -115,57 +116,79 @@ class SpotController
     // Seul le nom est obligatoire — tout le reste est facultatif
     // --------------------------------------------------------
     public function store(): void
-    {
-        if (empty($_SESSION['user_id'])) {
-            $this->json(['error' => 'Vous devez être connecté pour ajouter un spot.'], 401);
-            return;
-        }
-
-        $name        = trim($_POST['name']        ?? '');
-        $latitude    = $_POST['latitude']          ?? null;
-        $longitude   = $_POST['longitude']         ?? null;
-        $region      = trim($_POST['region']      ?? '');
-        $species     = trim($_POST['species']     ?? '');
-        $description = trim($_POST['description'] ?? '');
-
-        if ($name === '' || $latitude === null || $longitude === null) {
-            $this->json(['error' => 'Le nom et la position sur la carte sont obligatoires.'], 400);
-            return;
-        }
-
-        try {
-            $pdo  = Database::connect();
-            $stmt = $pdo->prepare(
-                'INSERT INTO fishing_spots (user_id, name, description, latitude, longitude, region, species)
-                 VALUES (?, ?, ?, ?, ?, ?, ?)'
-            );
-            $stmt->execute([
-                $_SESSION['user_id'],
-                $name,
-                $description !== '' ? $description : null,
-                $latitude,
-                $longitude,
-                $region !== '' ? $region : null,
-                $species !== '' ? $species : null,
-            ]);
-
-            $newId = $pdo->lastInsertId();
-
-            $stmt = $pdo->prepare('SELECT * FROM fishing_spots WHERE id = ?');
-            $stmt->execute([$newId]);
-            $spot = $stmt->fetch(PDO::FETCH_ASSOC);
-
-            // Champs additionnels attendus par le front (le créateur peut forcément
-            // supprimer son propre spot qu'il vient de créer)
-            $spot['creator_is_admin'] = !empty($_SESSION['is_admin']);
-            $spot['can_delete']       = true;
-            $spot['my_score']         = 0;
-
-            $this->json($spot, 201);
-        } catch (\Throwable $e) {
-            $this->json(['error' => 'Erreur serveur : ' . $e->getMessage()], 500);
-        }
+{
+    if (empty($_SESSION['user_id'])) {
+        $this->json(['error' => 'Vous devez être connecté pour ajouter un spot.'], 401);
+        return;
     }
+
+    $name        = trim($_POST['name']        ?? '');
+    $latitude    = $_POST['latitude']          ?? null;
+    $longitude   = $_POST['longitude']         ?? null;
+    $region      = trim($_POST['region']      ?? '');
+    $species     = trim($_POST['species']     ?? '');
+    $description = trim($_POST['description'] ?? '');
+
+    if ($name === '' || $latitude === null || $longitude === null) {
+        $this->json(['error' => 'Le nom et la position sur la carte sont obligatoires.'], 400);
+        return;
+    }
+
+    try {
+        $pdo = Database::connect();
+
+        // ── Anti-spam : 1 spot par heure (les admins sont exemptés) ──
+        // La requête UPDATE est atomique : impossible de contourner la limite
+        // en envoyant 2 requêtes en même temps.
+        if (empty($_SESSION['is_admin'])) {
+            $claim = $pdo->prepare(
+                'UPDATE users SET last_spot_at = NOW()
+                 WHERE id = ?
+                   AND (last_spot_at IS NULL
+                        OR last_spot_at <= NOW() - INTERVAL ' . self::SPOT_COOLDOWN_SECONDS . ' SECOND)'
+            );
+            $claim->execute([$_SESSION['user_id']]);
+
+            if ($claim->rowCount() === 0) {
+                $this->json([
+                    'error'       => 'Vous pouvez ajouter un spot par heure.',
+                    'cooldown'    => true,
+                    'retry_after' => $this->cooldownRemaining($pdo, (int) $_SESSION['user_id']),
+                ], 429);
+                return;
+            }
+        }
+
+        $stmt = $pdo->prepare(
+            'INSERT INTO fishing_spots (user_id, name, description, latitude, longitude, region, species)
+             VALUES (?, ?, ?, ?, ?, ?, ?)'
+        );
+        $stmt->execute([
+            $_SESSION['user_id'],
+            $name,
+            $description !== '' ? $description : null,
+            $latitude,
+            $longitude,
+            $region !== '' ? $region : null,
+            $species !== '' ? $species : null,
+        ]);
+
+        $newId = $pdo->lastInsertId();
+
+        $stmt = $pdo->prepare('SELECT * FROM fishing_spots WHERE id = ?');
+        $stmt->execute([$newId]);
+        $spot = $stmt->fetch(PDO::FETCH_ASSOC);
+
+        $spot['creator_is_admin'] = !empty($_SESSION['is_admin']);
+        $spot['creator_name']     = $_SESSION['username'] ?? '';
+        $spot['can_delete']       = true;
+        $spot['my_score']         = 0;
+
+        $this->json($spot, 201);
+    } catch (\Throwable $e) {
+        $this->json(['error' => 'Erreur serveur : ' . $e->getMessage()], 500);
+    }
+}
 
     // --------------------------------------------------------
     // POST /api/spot/rate → note rapide en étoiles (1 à 5), sans texte
@@ -294,6 +317,37 @@ class SpotController
             $this->json(['error' => 'Erreur serveur : ' . $e->getMessage()], 500);
         }
     }
+
+    // GET /api/spots/cooldown → temps restant avant de pouvoir ajouter un spot
+public function cooldown(): void
+{
+    if (empty($_SESSION['user_id'])) {
+        $this->json(['error' => 'Non connecté.'], 401);
+        return;
+    }
+    if (!empty($_SESSION['is_admin'])) {
+        $this->json(['remaining' => 0]);
+        return;
+    }
+    try {
+        $pdo = Database::connect();
+        $this->json(['remaining' => $this->cooldownRemaining($pdo, (int) $_SESSION['user_id'])]);
+    } catch (\Throwable $e) {
+        $this->json(['remaining' => 0]); // le serveur re-vérifiera de toute façon dans store()
+    }
+}
+
+private function cooldownRemaining(PDO $pdo, int $userId): int
+{
+    $stmt = $pdo->prepare('SELECT TIMESTAMPDIFF(SECOND, last_spot_at, NOW()) FROM users WHERE id = ?');
+    $stmt->execute([$userId]);
+    $elapsed = $stmt->fetchColumn();
+
+    if ($elapsed === false || $elapsed === null) {
+        return 0;
+    }
+    return max(0, self::SPOT_COOLDOWN_SECONDS - (int) $elapsed);
+}
 
     // --------------------------------------------------------
     // Un spot peut être supprimé par son créateur, ou par un admin

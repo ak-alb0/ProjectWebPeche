@@ -1,7 +1,9 @@
 <?php
 // Vue chargée par ParametresController::show() — $user injecté par le contrôleur
 $initiale    = strtoupper(substr($user['username'] ?? 'U', 0, 1));
-$memberSince = $user['created_at'] ? date('F Y', strtotime($user['created_at'])) : '';
+$mois = ['janvier','février','mars','avril','mai','juin','juillet','août','septembre','octobre','novembre','décembre'];
+$ts   = !empty($user['created_at']) ? strtotime($user['created_at']) : null;
+$memberSince = $ts ? $mois[(int) date('n', $ts) - 1] . ' ' . date('Y', $ts) : '';
 ?>
 <!DOCTYPE html>
 <html lang="fr">
@@ -11,7 +13,7 @@ $memberSince = $user['created_at'] ? date('F Y', strtotime($user['created_at']))
     <title>WebPêche — Paramètres</title>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
     <link rel="stylesheet" href="/assets/css/accueil.css">
-    <link rel="stylesheet" href="/assets/css/parametre.css">
+    <link rel="stylesheet" href="/assets/css/parametres.css">
 </head>
 <body class="theme-light" id="app">
 <div class="app-container">
@@ -31,7 +33,7 @@ $memberSince = $user['created_at'] ? date('F Y', strtotime($user['created_at']))
         <nav class="sidebar-nav">
             <p class="nav-label">NAVIGATION</p>
             <a href="/accueil"       class="nav-link"><i class="fa-solid fa-house"></i><span>Home Map</span></a>
-            <a href="/profil"        class="nav-link"><i class="fa-regular fa-circle-user"></i><span>Profil</span></a>
+            <a href="/communaute"        class="nav-link"><i class="fa-regular fa-circle-user"></i><span>Communauté</span></a>
             <a href="/parametres"     class="nav-link active"><i class="fa-solid fa-gear"></i><span>Paramètre</span></a>
             <a href="/documentation" class="nav-link"><i class="fa-solid fa-book"></i><span>Documentation</span></a>
         </nav>

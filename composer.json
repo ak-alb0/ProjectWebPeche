@@ -5,5 +5,11 @@
             "Andi\\ProjectWebPeche\\": "src/"
         }
     },
+    "authors": [
+        {
+            "name": "Andi",
+            "email": "andi-kelmendi@hotmail.com"
+        }
+    ],
     "require": {}
 }

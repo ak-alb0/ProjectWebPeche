@@ -1015,7 +1015,16 @@ body {
     margin-top: 18px;
     background: var(--text-accent);
 }
-
+.btn-auth {
+    border: none;
+    padding: 10px 0;
+    color: var(--bg-card);
+    font-size: 0.90rem;
+    font-weight: 600;
+    border-radius: 8px;
+    cursor: pointer;
+    transition: background 0.15s;
+}
 /* ================================================================
    PANNEAU LATÉRAL — Détails d'un spot ("Voir plus")
    ================================================================ */
@@ -1285,6 +1294,206 @@ body {
 
 .add-review-form .btn-auth {
     background: var(--text-accent);
+}
+
+.theme-dark .leaflet-tile-pane {
+    filter: invert(1) hue-rotate(180deg) brightness(0.95) contrast(0.9);
+}
+
+/* ================================================================
+   POPUP DE SPOT — nouveau design
+   ================================================================ */
+.leaflet-popup-content-wrapper {
+    border-radius: 16px;
+    padding: 0;
+    box-shadow: 0 14px 36px rgba(0,0,0,0.22);
+}
+
+.leaflet-popup-content { margin: 0; }
+
+.leaflet-container a.leaflet-popup-close-button {
+    top: 10px;
+    right: 10px;
+    color: var(--text-muted);
+}
+
+.spot-popup {
+    padding: 16px 18px 14px;
+    border-radius: 16px;
+}
+
+/* Bandeau doré en haut des spots du Support */
+.spot-popup.is-support { box-shadow: inset 0 3px 0 #f59e0b; }
+
+.popup-top {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    padding-right: 18px; /* laisse la place à la croix de fermeture */
+    margin-bottom: 10px;
+}
+
+.popup-author {
+    max-width: 150px;
+    margin-bottom: 0;
+}
+.popup-author span {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.popup-author.is-admin {
+    background: linear-gradient(135deg, #f59e0b, #f97316);
+    color: #ffffff;
+}
+
+.popup-title {
+    font-size: 1.05rem;
+    font-weight: 800;
+    line-height: 1.25;
+    margin: 0 0 8px;
+    color: var(--text-main);
+}
+
+.popup-meta {
+    display: flex;
+    align-items: flex-start;
+    gap: 7px;
+    font-size: 0.78rem;
+    color: var(--text-muted);
+    margin-bottom: 10px;
+}
+.popup-meta i { margin-top: 2px; color: var(--text-accent); }
+
+/* Pastilles d'espèces (popup + panneau) */
+.popup-species {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-bottom: 12px;
+}
+
+.species-chip {
+    display: inline-block;
+    padding: 3px 10px;
+    border-radius: 999px;
+    background: color-mix(in srgb, var(--text-accent) 12%, var(--bg-input));
+    color: var(--text-accent);
+    font-size: 0.73rem;
+    font-weight: 600;
+}
+.species-chip::first-letter { text-transform: uppercase; }
+.species-chip.species-empty { background: var(--bg-input); color: var(--text-muted); font-weight: 500; }
+.species-chip.species-more  { background: var(--bg-input); color: var(--text-muted); }
+
+.panel-species { margin: 10px 0 0; }
+
+/* Ligne "Votre note" */
+.popup-rate {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 9px 12px;
+    background: var(--bg-input);
+    border-radius: 10px;
+    margin-bottom: 12px;
+}
+.popup-rate-label { font-size: 0.74rem; font-weight: 600; color: var(--text-muted); }
+
+/* Boutons */
+.popup-actions { display: flex; align-items: center; gap: 8px; margin: 0; }
+
+.popup-more {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    border: none;
+    border-radius: 10px;
+    padding: 10px 14px;
+    background: var(--text-accent);
+    color: #ffffff;
+    font-size: 0.82rem;
+    font-weight: 600;
+    font-family: inherit;
+    cursor: pointer;
+    transition: opacity 0.15s, transform 0.1s;
+}
+.popup-more:hover  { opacity: 0.9; }
+.popup-more:active { transform: scale(0.98); }
+
+.popup-delete {
+    width: 38px;
+    height: 38px;
+    border-radius: 10px;
+    border: 1px solid rgba(220,38,38,0.3);
+    background: rgba(220,38,38,0.08);
+    color: #dc2626;
+    cursor: pointer;
+}
+.popup-delete:hover { background: rgba(220,38,38,0.16); }
+
+/* ================================================================
+   SUPPORT — pins d'une autre couleur + filtre dédié
+   ================================================================ */
+.marker-support { filter: hue-rotate(190deg) saturate(1.4); } /* bleu → doré */
+
+.filter-fixed { padding: 6px 6px 0; }
+.filter-divider {
+    padding: 10px 16px 2px;
+    font-size: 0.68rem;
+    font-weight: 700;
+    letter-spacing: 0.5px;
+    text-transform: uppercase;
+    color: var(--text-muted);
+}
+.filter-item.filter-support:not(.active) i:first-child { color: #f59e0b; }
+.filter-item.filter-support.active { background: #f59e0b; }
+
+/* ================================================================
+   POPUP COOLDOWN
+   ================================================================ */
+.cooldown-box {
+    width: 380px;
+    text-align: center;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 10px;
+}
+.cooldown-box h2 { font-size: 1.2rem; font-weight: 800; }
+.cooldown-box p  { font-size: 0.87rem; color: var(--text-muted); line-height: 1.5; }
+.cooldown-box strong { color: var(--text-main); }
+
+.cooldown-icon {
+    width: 56px;
+    height: 56px;
+    border-radius: 16px;
+    background: rgba(245,158,11,0.15);
+    color: #f59e0b;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1.5rem;
+}
+
+.cooldown-timer {
+    font-size: 2.4rem;
+    font-weight: 800;
+    font-variant-numeric: tabular-nums;
+    color: var(--text-accent);
+    margin-top: 4px;
+}
+.cooldown-hint { margin-top: -6px; }
+
+.cooldown-close {
+    width: 100%;
+    margin-top: 8px;
+    background: var(--text-accent);
+    color: #ffffff;
 }
 
 /* ================================================================

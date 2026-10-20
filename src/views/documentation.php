@@ -38,8 +38,8 @@ $email    = htmlspecialchars($_SESSION['email'] ?? '');
             <a href="/accueil" class="nav-link">
                 <i class="fa-solid fa-house"></i><span>Home Map</span>
             </a>
-            <a href="/profil" class="nav-link">
-                <i class="fa-regular fa-circle-user"></i><span>Profil</span>
+            <a href="/communaute" class="nav-link">
+                <i class="fa-regular fa-circle-user"></i><span>Communauté</span>
             </a>
             <a href="/parametres" class="nav-link">
                 <i class="fa-solid fa-gear"></i><span>Paramètre</span>
